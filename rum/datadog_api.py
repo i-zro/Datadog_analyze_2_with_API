@@ -15,21 +15,22 @@ def build_usr_query(usr_id_value: str) -> str:
 def search_rum_events_usr_id(
     settings: Settings,
     usr_id_value: str,
-    minutes: int = 10,
+    from_ts: str,
+    to_ts: str,
     limit_per_page: int = 200,
     max_pages: int = 5,
     tz_name: str = "Asia/Seoul",
 ) -> Tuple[list, List[Dict[str, Any]]]:
     """
     Datadog RUM 이벤트 검색:
-    - 기간: now-<minutes>m ~ now
+    - 기간: from_ts ~ to_ts
     - 필터: @usr.id:"..." (비어있으면 전체)
     - 페이지네이션: 커서 따라가며 max_pages까지 수집
     """
     search_url = get_search_url(settings.site)
 
     body = {
-        "filter": {"from": f"now-{minutes}m", "to": "now", "query": build_usr_query(usr_id_value)},
+        "filter": {"from": from_ts, "to": to_ts, "query": build_usr_query(usr_id_value)},
         "page": {"limit": limit_per_page},
         "sort": "-timestamp",
     }

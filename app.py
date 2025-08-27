@@ -1,12 +1,14 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime, time, timedelta
+import pytz
 
 from rum.config import get_settings, get_search_url, get_default_hidden_columns
 from rum.datadog_api import search_rum_events_usr_id
 from rum.transform import to_base_dataframe, apply_view_filters
 
 st.set_page_config(page_title="Datadog RUM Search", layout="wide")
-st.title("Datadog RUM 검색 (usr.id 기준, 최근 N분 / KST ms 표시)")
+st.title("Datadog RUM 검색 (usr.id 기준, KST ms 표시)")
 
 # ─────────────────────────────────────────
 # 고정 핀(맨 왼쪽 두 칸: timestamp(KST) 다음)
@@ -73,10 +75,38 @@ def sanitize_pin_slots(slot_values: list[str], visible_candidates: list[str], co
 with st.sidebar:
     st.markdown("### 검색 조건")
     usr_id = st.text_input("usr.id", value="", placeholder="예: user_1234 (비우면 전체 *)")
-    minutes = st.number_input("최근 분(min)", min_value=1, max_value=1440, value=10, step=1)
+
+    # --- 시간 입력 --- #
+    kst = pytz.timezone("Asia/Seoul")
+
+    # 세션 상태에 시간 값 초기화
+    if "start_dt" not in ss:
+        ss.start_dt = datetime.now(kst) - timedelta(minutes=10)
+    if "end_dt" not in ss:
+        ss.end_dt = datetime.now(kst)
+
+    st.markdown("##### 검색 기간 (KST)")
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date_val = st.date_input("시작 날짜", value=ss.start_dt.date())
+        start_time_val = st.time_input("시작 시간", value=ss.start_dt.time())
+    with col2:
+        end_date_val = st.date_input("종료 날짜", value=ss.end_dt.date())
+        end_time_val = st.time_input("종료 시간", value=ss.end_dt.time())
+
+    # 입력 위젯의 현재 값으로 세션 상태 업데이트
+    ss.start_dt = kst.localize(datetime.combine(start_date_val, start_time_val))
+    ss.end_dt = kst.localize(datetime.combine(end_date_val, end_time_val))
+    # --- 시간 입력 끝 --- #
+
     limit_per_page = st.slider("페이지당 개수(limit)", min_value=50, max_value=1000, value=200, step=50)
     max_pages = st.slider("최대 페이지 수", min_value=1, max_value=20, value=5, step=1)
-    run = st.button("조회")
+
+    is_valid_time_range = ss.start_dt < ss.end_dt
+    if not is_valid_time_range:
+        st.error("시작 시간은 종료 시간보다 빨라야 합니다.")
+
+    run = st.button("조회", disabled=not is_valid_time_range)
 
 st.write(f"**Site:** `{settings.site}` · **Endpoint:** `{SEARCH_URL}`")
 
@@ -84,11 +114,15 @@ st.write(f"**Site:** `{settings.site}` · **Endpoint:** `{SEARCH_URL}`")
 # 조회 실행
 # ─────────────────────────────────────────
 if run:
+    from_ts_utc = ss.start_dt.astimezone(pytz.utc).isoformat()
+    to_ts_utc = ss.end_dt.astimezone(pytz.utc).isoformat()
+
     with st.spinner("검색 중..."):
         rows, raw = search_rum_events_usr_id(
             settings=settings,
             usr_id_value=usr_id,
-            minutes=int(minutes),
+            from_ts=from_ts_utc,
+            to_ts=to_ts_utc,
             limit_per_page=int(limit_per_page),
             max_pages=int(max_pages),
             tz_name="Asia/Seoul",
@@ -98,7 +132,7 @@ if run:
     if not rows:
         ss.df_base = None
         ss.df_view = None
-        st.info("검색 결과가 없습니다. usr.id 값과 최근 N분 내 데이터 존재 여부를 확인하세요.")
+        st.info("검색 결과가 없습니다. usr.id 값과 지정된 시간 내 데이터 존재 여부를 확인하세요.")
     else:
         ss.df_base = to_base_dataframe(raw, tz_name="Asia/Seoul")
 

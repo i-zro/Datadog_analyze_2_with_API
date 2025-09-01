@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil import tz
 from typing import Dict, Any, List
 import pandas as pd
+from collections import defaultdict
 
 # ----- 시간 변환 -----
 def iso_to_kst_ms(iso_str: str, tz_name: str = "Asia/Seoul") -> str:
@@ -27,70 +28,125 @@ def flatten(prefix: str, obj: Any, out: Dict[str, Any]) -> None:
 
 # ----- 행 생성 -----
 def build_rows_dynamic(all_events: List[Dict[str, Any]], tz_name="Asia/Seoul") -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    for e in all_events:
-        attrs = e.get("attributes", {}) or {}
+    """
+    RUM 이벤트 목록을 평탄화된 행(딕셔너리)의 목록으로 변환합니다.
+    - 중첩된 속성을 'a.b.c' 형태로 평탄화합니다.
+    - 타임스탬프를 KST로 변환합니다.
+    - 여러 형태의 Call ID를 단일 필드로 통합합니다.
+    """
+    processed_rows: List[Dict[str, Any]] = []
+    for event in all_events:
+        attrs = event.get("attributes", {}) or {}
 
-        row: Dict[str, Any] = {}
-        row["timestamp(KST)"] = iso_to_kst_ms(attrs.get("timestamp"), tz_name)
-        row["type"] = attrs.get("type")
-        row["service"] = attrs.get("service")
+        # 1. 모든 속성을 평탄화합니다.
+        flat_row: Dict[str, Any] = {}
+        flatten("", attrs, flat_row)
 
-        flat: Dict[str, Any] = {}
-        flatten("", attrs, flat)
+        # 2. 타임스탬프를 KST로 변환하여 'timestamp(KST)' 키에 저장합니다.
+        flat_row["timestamp(KST)"] = iso_to_kst_ms(attrs.get("timestamp"), tz_name)
 
-        # [수정] callID 관련 필드를 `context.call_id`로 통합합니다.
+        # 3. Call ID를 통합합니다.
         # Datadog RUM 이벤트 구조상 custom attribute는 `attributes.attributes` 내부에 위치하므로,
         # 평탄화된 키는 'attributes.' 접두사를 갖게 됩니다.
         call_id_val = (
-            flat.get("attributes.context.callID")
-            or flat.get("attributes.context.callId")
-            or flat.get("attributes.context.CallIDs")
+            flat_row.get("attributes.context.callID")
+            or flat_row.get("attributes.context.callId")
         )
 
-        if call_id_val:
-            # 'context.call_id' 라는 일관된 이름의 새 키를 생성합니다.
-            flat["Call ID"] = call_id_val
-            # 데이터 중복과 혼동을 막기 위해 사용된 모든 기존 키를 제거합니다.
-            for key in [
-                "attributes.context.callID",
-                "attributes.context.callId",
-                "attributes.context.CallIDs",
-            ]:
-                flat.pop(key, None)
+        if call_id_val is not None:
+            flat_row["Call ID"] = call_id_val
+            # 기존 키를 제거하여 중복을 방지합니다.
+            flat_row.pop("attributes.context.callID", None)
+            flat_row.pop("attributes.context.callId", None)
 
-        aliases = {
-            "application.id": flat.get("application.id"),
-            "session.id": flat.get("session.id"),
-            "session.type": flat.get("session.type"),
-            "view.url": flat.get("view.url"),
-            "view.referrer": flat.get("view.referrer"),
-            "usr.id": flat.get("usr.id"),
-            "usr.name": flat.get("usr.name"),
-            "usr.email": flat.get("usr.email"),
-            "action.type": flat.get("action.type"),
-            "action.target.name": flat.get("action.target.name"),
-            "resource.type": flat.get("resource.type"),
-            "resource.url": flat.get("resource.url"),
-            "error.message": flat.get("error.message"),
-            "error.source": flat.get("error.source"),
-            "error.stack": flat.get("error.stack"),
-            "device.type": flat.get("device.type"),
-            "os.name": flat.get("os.name"),
-            "browser.name": flat.get("browser.name"),
-            "attribute.os.build": flat.get("attribute.os.build"),
-        }
+        processed_rows.append(flat_row)
+    return processed_rows
 
-        # row.update(aliases)
-        row.update(flat)
+# ----- 통화 요약 -----
+def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    """
+    RUM 이벤트를 Call ID별로 그룹화하고 통화 정보를 요약합니다.
 
-        rows.append(row)
-    return rows
+    - 종료 사유: SDK_CALL_STATUS_STOPPING 이벤트에서 추출
+    - Send/Receive Packets: ENGINE_SendPackets/ReceivePackets 이벤트에서 최근 3개의 totalCount 추출
+    """
+    # 1. 먼저 모든 이벤트를 평탄화된 행으로 변환합니다.
+    # 2. 'Call ID'를 기준으로 이벤트를 그룹화합니다.
+    calls = defaultdict(list)
+    for row in flat_rows:
+        call_id = row.get("Call ID")
+        if call_id:
+            calls[call_id].append(row)
+
+    if not calls:
+        return pd.DataFrame()
+
+    # 3. 각 통화 그룹을 처리하여 요약 정보를 생성합니다.
+    summaries = []
+    for call_id, events in calls.items():
+        # events 리스트는 이미 최신순으로 정렬되어 있습니다.
+        termination_reason = None
+        send_packets = []
+        receive_packets = []
+
+        # 가장 최근 이벤트에서 공통 정보(예: usr.id)를 가져옵니다.
+        first_event = events[0]
+        usr_id = first_event.get("usr.id")
+
+        # 통화 시작 및 종료 시간을 계산합니다.
+        # 리스트가 최신순이므로, 0번 인덱스가 종료, 마지막 인덱스가 시작입니다.
+        end_time_str = events[0].get("timestamp(KST)")
+        start_time_str = events[-1].get("timestamp(KST)")
+
+        duration_str = "N/A"
+        try:
+            # " KST"를 제거하고 datetime 객체로 파싱합니다. 포맷: 2024-01-01 12:34:56.789
+            end_dt = datetime.strptime(end_time_str.replace(" KST", ""), "%Y-%m-%d %H:%M:%S.%f")
+            start_dt = datetime.strptime(start_time_str.replace(" KST", ""), "%Y-%m-%d %H:%M:%S.%f")
+            duration = end_dt - start_dt
+            # 초 단위까지만 깔끔하게 표시합니다.
+            duration_str = str(duration - timedelta(microseconds=duration.microseconds))
+        except (ValueError, TypeError, AttributeError):
+            pass  # 파싱 실패 시 "N/A" 유지
+
+        for event in events:
+            path = event.get("attributes.resource.url_path")
+
+            if path == "/res/SDK_CALL_STATUS_STOPPING" and termination_reason is None:
+                termination_reason = event.get("attributes.context.eventType")
+
+            if path == "/res/ENGINE_SendPackets" and len(send_packets) < 3:
+                count = event.get("attributes.context.totalCount")
+                if count is not None:
+                    send_packets.append(count)
+
+            # 참고: 요청에 개수 제한이 명시되지 않았으나, 일관성을 위해 최근 3개로 제한합니다.
+            if path == "/res/ENGINE_ReceivePackets" and len(receive_packets) < 3:
+                count = event.get("attributes.context.totalCount")
+                if count is not None:
+                    receive_packets.append(count)
+
+        summaries.append({
+            "Call ID": call_id,
+            "User ID": usr_id,
+            "Start Time (KST)": start_time_str,
+            "End Time (KST)": end_time_str,
+            "Duration": duration_str,
+            "Termination Reason": termination_reason,
+            "SendPackets Counts (last 3)": send_packets,
+            "ReceivePackets Counts (last 3)": receive_packets,
+        })
+
+    summary_df = pd.DataFrame(summaries)
+    if not summary_df.empty and "Start Time (KST)" in summary_df.columns:
+        summary_df = summary_df.sort_values("Start Time (KST)", ascending=False).reset_index(drop=True)
+
+    return summary_df
 
 # ----- DataFrame 생성/정렬 -----
-def to_base_dataframe(raw: List[Dict[str, Any]], tz_name="Asia/Seoul") -> pd.DataFrame:
-    dyn_rows = build_rows_dynamic(raw, tz_name=tz_name)
-    df = pd.DataFrame(dyn_rows)
+def to_base_dataframe(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    """평탄화된 행 목록으로부터 DataFrame을 생성하고 시간순으로 정렬합니다."""
+    df = pd.DataFrame(flat_rows)
 
     if "timestamp(KST)" in df.columns:
         parsed_ts = pd.to_datetime(

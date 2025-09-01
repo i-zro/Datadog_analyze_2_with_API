@@ -19,8 +19,7 @@ def search_rum_events_usr_id(
     to_ts: str,
     limit_per_page: int = 200,
     max_pages: int = 5,
-    tz_name: str = "Asia/Seoul",
-) -> Tuple[list, List[Dict[str, Any]]]:
+) -> List[Dict[str, Any]]:
     """
     Datadog RUM 이벤트 검색:
     - 기간: from_ts ~ to_ts
@@ -56,7 +55,7 @@ def search_rum_events_usr_id(
                 st.code(resp.text, language="json")
             except Exception:
                 st.write(resp.text)
-            return [], []
+            return []
 
         data = resp.json()
         events = data.get("data", [])
@@ -66,20 +65,4 @@ def search_rum_events_usr_id(
         if not cursor:
             break
 
-    # 간단 행(호환성 유지용)
-    def _row(e):
-        attrs = e.get("attributes", {}) or {}
-        kst_str = iso_to_kst_ms(attrs.get("timestamp"), tz_name)
-        return {
-            "timestamp(KST)": kst_str,
-            "type": attrs.get("type"),
-            "service": attrs.get("service"),
-            "view.url": (attrs.get("view", {}) or {}).get("url") if isinstance(attrs.get("view"), dict) else None,
-            "session.id": (attrs.get("session", {}) or {}).get("id") if isinstance(attrs.get("session"), dict) else None,
-            "usr.id": (attrs.get("usr", {}) or {}).get("id") if isinstance(attrs.get("usr"), dict) else None,
-            "action.target.name": ((attrs.get("action", {}) or {}).get("target", {}) or {}).get("name") if isinstance(attrs.get("action"), dict) else None,
-            "error.message": (attrs.get("error", {}) or {}).get("message") if isinstance(attrs.get("error"), dict) else None,
-        }
-
-    rows = [_row(e) for e in all_events]
-    return rows, all_events
+    return all_events

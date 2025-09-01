@@ -5,11 +5,10 @@ import pytz
 
 from rum.config import get_settings, get_search_url, get_default_hidden_columns
 from rum.datadog_api import search_rum_events_usr_id
-from rum.transform import to_base_dataframe, apply_view_filters
+from rum.transform import build_rows_dynamic, to_base_dataframe, apply_view_filters, summarize_calls
 
 st.set_page_config(page_title="Datadog RUM Search", layout="wide")
-st.title("Datadog RUM 검색 (usr.id 기준, KST ms 표시)")
-
+st.title("📞 Datadog RUM 분석기")
 # ─────────────────────────────────────────
 # 고정 핀(맨 왼쪽 두 칸: timestamp(KST) 다음)
 # ─────────────────────────────────────────
@@ -32,6 +31,8 @@ if "df_base" not in ss:
     ss.df_base = None
 if "df_view" not in ss:
     ss.df_view = None  # 렌더용 캐시(적용된 결과)
+if "df_summary" not in ss:
+    ss.df_summary = None # 통화 요약 데이터
 if "hide_defaults" not in ss:
     ss.hide_defaults = get_default_hidden_columns()   # 기본 숨김(사이드바에 표시 X)
 if "hidden_cols_user" not in ss:
@@ -118,46 +119,44 @@ if run:
     to_ts_utc = ss.end_dt.astimezone(pytz.utc).isoformat()
 
     with st.spinner("검색 중..."):
-        rows, raw = search_rum_events_usr_id(
+        raw_events = search_rum_events_usr_id(
             settings=settings,
             usr_id_value=usr_id,
             from_ts=from_ts_utc,
             to_ts=to_ts_utc,
             limit_per_page=int(limit_per_page),
             max_pages=int(max_pages),
-            tz_name="Asia/Seoul",
         )
-    st.success(f"가져온 이벤트: {len(rows)}건")
+    st.success(f"가져온 이벤트: {len(raw_events)}건")
 
-    if not rows:
+    if not raw_events:
         ss.df_base = None
         ss.df_view = None
+        ss.df_summary = None
         st.info("검색 결과가 없습니다. usr.id 값과 지정된 시간 내 데이터 존재 여부를 확인하세요.")
     else:
-        ss.df_base = to_base_dataframe(raw, tz_name="Asia/Seoul")
+        # 1. 모든 이벤트를 한 번만 평탄화하여 처리 효율을 높입니다.
+        with st.spinner("이벤트 데이터 변환 중..."):
+            flat_rows = build_rows_dynamic(raw_events, tz_name="Asia/Seoul")
 
-        # 현재 컬럼 목록
+        # 2. 통화 요약 정보 생성
+        with st.spinner("통화 정보 요약 중..."):
+            ss.df_summary = summarize_calls(flat_rows)
+
+        # 3. 이벤트 로그 DataFrame 생성
+        ss.df_base = to_base_dataframe(flat_rows)
+
+        # 4. 이벤트 로그 뷰(표시 옵션 적용) 설정
         cols_now = [c for c in ss.df_base.columns if c != "timestamp(KST)"]
-
-        # 적용/대기 상태 초기화(교집합 유지)
         ss.hidden_cols_user = [c for c in ss.hidden_cols_user if c in cols_now]
         ss.pending_hidden_cols_user = ss.hidden_cols_user.copy()
-
-        # 보이는 후보(대기 숨김 기준으로 계산)
         eff_hidden_proposed = effective_hidden(cols_now, ss.pending_hidden_cols_user)
         visible_candidates_after = [c for c in cols_now if c not in eff_hidden_proposed and c != FIXED_PIN]
-
-        # 핀 슬롯 초기화/보정
         ss.pin_slots = sanitize_pin_slots(ss.pin_slots, visible_candidates_after)
         ss.pending_pin_slots = ss.pin_slots.copy()
-
-        # 뷰 초기 생성(적용 상태 기준)
         eff_hidden_applied = effective_hidden(cols_now, ss.hidden_cols_user)
         ss.df_view = apply_view_filters(
-            ss.df_base.copy(),
-            auto_hide_sparse=False,
-            sparse_threshold=0,
-            hidden_cols=eff_hidden_applied,
+            ss.df_base.copy(), auto_hide_sparse=False, sparse_threshold=0, hidden_cols=eff_hidden_applied
         )
 
 # ─────────────────────────────────────────
@@ -211,33 +210,22 @@ with st.sidebar:
         # ───── 3) 보기 새로고침 (적용 버튼) ─────
         apply_view = st.button("보기 새로고침")
         if apply_view:
-            # 선택값 적용
             ss.hidden_cols_user = ss.pending_hidden_cols_user.copy()
             ss.pin_slots = sanitize_pin_slots(ss.pending_pin_slots, visible_candidates_after)
-
-            # 적용 숨김으로 뷰 재계산
             eff_hidden_applied = effective_hidden(all_cols, ss.hidden_cols_user)
             ss.df_view = apply_view_filters(
-                ss.df_base.copy(),
-                auto_hide_sparse=False,
-                sparse_threshold=0,
-                hidden_cols=eff_hidden_applied,
+                ss.df_base.copy(), auto_hide_sparse=False, sparse_threshold=0, hidden_cols=eff_hidden_applied
             )
             st.rerun()
 
-        # 사용자 숨김 초기화 버튼(기본 숨김 유지)
         reset_user_hide = st.button("모두 표시(사용자 숨김 초기화)")
         if reset_user_hide:
             ss.pending_hidden_cols_user = []
-            ss.pending_pin_slots = ss.pin_slots.copy()  # 핀은 유지
-            # 적용도 초기화
+            ss.pending_pin_slots = ss.pin_slots.copy()
             ss.hidden_cols_user = []
             eff_hidden_applied = effective_hidden(all_cols, ss.hidden_cols_user)
             ss.df_view = apply_view_filters(
-                ss.df_base.copy(),
-                auto_hide_sparse=False,
-                sparse_threshold=0,
-                hidden_cols=eff_hidden_applied,
+                ss.df_base.copy(), auto_hide_sparse=False, sparse_threshold=0, hidden_cols=eff_hidden_applied
             )
             st.rerun()
     else:
@@ -265,6 +253,14 @@ def reorder_for_pinned(df: pd.DataFrame, fixed_second: str, pin_slots: list[str]
     return df[pins + rest]
 
 if ss.df_view is not None:
+    # 1. 통화 분석 섹션 렌더링
+    if ss.df_summary is not None and not ss.df_summary.empty:
+        st.markdown("## 📞 통화 분석")
+        st.dataframe(ss.df_summary, use_container_width=True)
+        st.divider()
+
+    # 2. 이벤트 로그 섹션 렌더링
+    st.markdown("## 📄 이벤트 로그")
     df_render = reorder_for_pinned(ss.df_view, FIXED_PIN, ss.pin_slots)
     st.dataframe(df_render, use_container_width=True, height=ss.table_height)
 

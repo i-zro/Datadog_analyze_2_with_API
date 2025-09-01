@@ -39,6 +39,26 @@ def build_rows_dynamic(all_events: List[Dict[str, Any]], tz_name="Asia/Seoul") -
         flat: Dict[str, Any] = {}
         flatten("", attrs, flat)
 
+        # [수정] callID 관련 필드를 `context.call_id`로 통합합니다.
+        # Datadog RUM 이벤트 구조상 custom attribute는 `attributes.attributes` 내부에 위치하므로,
+        # 평탄화된 키는 'attributes.' 접두사를 갖게 됩니다.
+        call_id_val = (
+            flat.get("attributes.context.callID")
+            or flat.get("attributes.context.callId")
+            or flat.get("attributes.context.CallIDs")
+        )
+
+        if call_id_val:
+            # 'context.call_id' 라는 일관된 이름의 새 키를 생성합니다.
+            flat["Call ID"] = call_id_val
+            # 데이터 중복과 혼동을 막기 위해 사용된 모든 기존 키를 제거합니다.
+            for key in [
+                "attributes.context.callID",
+                "attributes.context.callId",
+                "attributes.context.CallIDs",
+            ]:
+                flat.pop(key, None)
+
         aliases = {
             "application.id": flat.get("application.id"),
             "session.id": flat.get("session.id"),
@@ -63,6 +83,7 @@ def build_rows_dynamic(all_events: List[Dict[str, Any]], tz_name="Asia/Seoul") -
 
         # row.update(aliases)
         row.update(flat)
+
         rows.append(row)
     return rows
 

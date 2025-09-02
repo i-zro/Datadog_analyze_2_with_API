@@ -75,7 +75,7 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
         termination_reason = None
         bye_reason = None
         send_packets = []
-        receive_packets = []
+        receive_health_check = []
         request_status, accept_status, reject_status, end_status = None, None, None, None
         active_ts, stopping_ts = None, None
 
@@ -120,10 +120,10 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
                 count = event.get("attributes.context.totalCount")
                 if count is not None:
                     send_packets.append(count)
-            elif path == "/res/ENGINE_ReceivePackets" and len(receive_packets) < 3:
+            elif path == "/res/ENGINE_ReceiveHealthCheck" and len(receive_health_check) < 3:
                 count = event.get("attributes.context.totalCount")
                 if count is not None:
-                    receive_packets.append(count)
+                    receive_health_check.append(count)
         
         duration_str = ""
         if stopping_ts is None:
@@ -151,7 +151,7 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
             "rejectCall_status_code": reject_status,
             "endCall_status_code": end_status,
             "SendPackets 수": send_packets,
-            "ReceivePackets 수": receive_packets,
+            "ReceiveHealthCheck 수": receive_health_check,
         })
 
     summary_df = pd.DataFrame(summaries)

@@ -1,6 +1,5 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 from .helpers import effective_hidden, sanitize_pin_slots, reorder_for_pinned, filter_dataframe, apply_row_highlighting
@@ -90,7 +89,7 @@ def render_options_sidebar(ss, pin_count, fixed_pin):
         ss.df_view = apply_view_filters(ss.df_base.copy(), hidden_cols=eff_hidden_applied)
         st.rerun()
 
-def render_main_view(ss, pin_count, fixed_pin):
+def render_main_view(ss, fixed_pin):
     """메인 화면(통화 분석, 이벤트 로그)을 렌더링합니다."""
     if ss.df_view is not None:
         if ss.df_summary is not None and not ss.df_summary.empty:

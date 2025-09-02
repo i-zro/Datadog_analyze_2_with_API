@@ -120,7 +120,7 @@ def main():
         handle_search_and_process_data(settings, search_params)
     
     # 메인 뷰 렌더링
-    render_main_view(ss, PIN_COUNT, FIXED_PIN)
+    render_main_view(ss, FIXED_PIN)
 
 if __name__ == "__main__":
     main()

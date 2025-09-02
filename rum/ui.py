@@ -101,9 +101,19 @@ def render_main_view(ss, pin_count, fixed_pin):
         st.markdown("## 📄 이벤트 로그")
         
         # --- 필터 및 하이라이트 UI ---
-        col1, col2 = st.columns([4, 1])
+        # url path 필터
+        col1, col2 = st.columns([9, 1])
         filter_text = col1.text_input("URL Path 필터", placeholder="쉼표(,)로 구분하여 여러 개 입력")
         is_and = col2.checkbox("AND 조건", help="모든 키워드를 포함하는 로그만 필터링")
+        # Call ID 필터
+        if ss.unique_call_ids:
+            selected_call_id = st.selectbox(
+                "📞 Call ID 필터",
+                options=["전체"] + ss.unique_call_ids,
+                help="특정 통화에 해당하는 로그만 필터링합니다."
+            )
+        else:
+            selected_call_id = "전체"
         
         st.markdown("##### 행 하이라이트 (쉼표로 구분, OR 조건)")
         h_col1, h_col2, h_col3 = st.columns(3)
@@ -114,6 +124,10 @@ def render_main_view(ss, pin_count, fixed_pin):
 
         df_render = reorder_for_pinned(ss.df_view, fixed_pin, ss.pin_slots)
         
+        # Call ID 필터링 적용
+        if selected_call_id != "전체":
+            df_render = df_render[df_render["Call ID"] == selected_call_id]
+
         if filter_text:
             df_render = filter_dataframe(df_render, fixed_pin, filter_text, is_and)
 

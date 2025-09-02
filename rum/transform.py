@@ -88,8 +88,22 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
 
             if path == "/res/SDK_CALL_STATUS_ACTIVE" and active_ts is None:
                 active_ts = timestamp_str
-            elif path == "/res/SDK_CALL_STATUS_STOPPING" and stopping_ts is None:
-                stopping_ts = timestamp_str
+            elif path == "/res/SDK_CALL_STATUS_STOPPING":
+                if stopping_ts is None:
+                    stopping_ts = timestamp_str
+                if termination_reason is None:
+                    event_type = event.get("attributes.context.eventType")
+                    event_detail = event.get("attributes.context.eventDetail")
+                    
+                    parts = []
+                    if event_type:
+                        parts.append(str(event_type))
+                    if event_detail:
+                        parts.append(f"({event_detail})")
+
+                    if parts:
+                        termination_reason = " ".join(parts)
+
             elif path == "/res/requestVoiceCall" and request_status is None:
                 request_status = status_code
             elif path == "/res/acceptCall" and accept_status is None:
@@ -98,8 +112,6 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
                 reject_status = status_code
             elif path == "/res/endCall" and end_status is None:
                 end_status = status_code
-            elif path == "/res/SDK_CALL_STATUS_STOPPING" and termination_reason is None:
-                termination_reason = event.get("attributes.context.eventType")
             elif path == "/res/ENGINE_SendPackets" and len(send_packets) < 3:
                 count = event.get("attributes.context.totalCount")
                 if count is not None:
@@ -128,13 +140,13 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
             "Start Time (KST)": overall_start_time_str,
             "End Time (KST)": overall_end_time_str,
             "Duration": duration_str,
-            "Termination Reason": termination_reason,
+            "종료 사유": termination_reason,
             "requestVoiceCall_status_code": request_status,
             "acceptCall_status_code": accept_status,
             "rejectCall_status_code": reject_status,
             "endCall_status_code": end_status,
-            "SendPackets Counts (last 3)": send_packets,
-            "ReceivePackets Counts (last 3)": receive_packets,
+            "SendPackets 수": send_packets,
+            "ReceivePackets 수": receive_packets,
         })
 
     summary_df = pd.DataFrame(summaries)
@@ -147,15 +159,11 @@ def to_base_dataframe(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
     """평탄화된 행 목록으로부터 DataFrame을 생성하고, 데이터 타입을 변환한 후 시간순으로 정렬합니다."""
     df = pd.DataFrame(flat_rows)
 
-    # status_code와 duration을 정수형으로 변환 (소수점 및 NaN 처리)
     for col in ["attributes.resource.status_code", "attributes.resource.duration"]:
         if col in df.columns:
-            # 숫자로 변환하고, 변환 불가능한 값은 NaT/NaN으로 처리합니다.
-            # 이후, NaN 값을 지원하는 Int64 타입으로 변환하여 정수형을 유지합니다.
             df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
 
     if "timestamp(KST)" in df.columns:
-        # KST 시간 문자열을 datetime 객체로 변환하여 정렬에 사용
         parsed_ts = pd.to_datetime(
             df["timestamp(KST)"].str.replace(" KST", "", regex=False),
             format="%Y-%m-%d %H:%M:%S.%f",

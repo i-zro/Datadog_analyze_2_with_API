@@ -30,6 +30,7 @@ def initialize_session_state():
         "hidden_cols_user": [],  # 사용자가 선택한 숨길 열 목록
         "table_height": 900,  # 테이블 높이
         "pin_slots": [""] * PIN_COUNT,  # 고정 열 슬롯
+        "unique_call_ids": [], # 고유 통화 ID 목록
     }
     for key, value in defaults.items():
         if key not in ss:
@@ -59,6 +60,7 @@ def handle_search_and_process_data(settings, params):
     if not raw_events:
         # 검색 결과가 없으면 세션 상태 초기화
         ss.df_base = ss.df_view = ss.df_summary = None
+        ss.unique_call_ids = []
         st.info("검색 결과가 없습니다.")
         return
 
@@ -83,6 +85,12 @@ def handle_search_and_process_data(settings, params):
     # 최종 뷰 생성
     eff_hidden_applied = effective_hidden(all_cols, ss.hidden_cols_user, ss.hide_defaults, FIXED_PIN)
     ss.df_view = apply_view_filters(ss.df_base.copy(), hidden_cols=eff_hidden_applied)
+
+    # 고유 Call ID 목록 추출
+    if "Call ID" in ss.df_base.columns:
+        ss.unique_call_ids = sorted(ss.df_base["Call ID"].dropna().unique().tolist())
+    else:
+        ss.unique_call_ids = []
 
 # ─────────────────────────────────────────
 # Main App Logic

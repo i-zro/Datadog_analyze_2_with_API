@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import datetime
 import pytz
+import pandas as pd
 
 from .helpers import effective_hidden, sanitize_pin_slots, reorder_for_pinned, filter_dataframe, apply_row_highlighting
 from .transform import apply_view_filters
@@ -132,6 +133,9 @@ def render_main_view(ss, fixed_pin):
 
         # 하이라이트 적용
         styler = apply_row_highlighting(df_render, red_kws, blue_kws, yellow_kws)
+
+        if df_render.size > 262144:  # default is 2**18
+            pd.set_option("styler.render.max_elements", df_render.size + 1)
 
         st.dataframe(styler, use_container_width=True, height=ss.table_height)
         

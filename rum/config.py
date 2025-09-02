@@ -4,25 +4,34 @@ from dataclasses import dataclass
 
 @dataclass
 class Settings:
+    """애플리케이션 설정값을 저장하는 데이터 클래스"""
     api_key: str
     app_key: str
-    site: str  # 예: "ap1.datadoghq.com" / "datadoghq.com" / "eu.datadoghq.com"
+    site: str  # 예: "ap1.datadoghq.com", "datadoghq.com", "eu.datadoghq.com"
 
 def get_settings() -> Settings:
-    api = st.secrets.get("DD_API_KEY", os.getenv("DD_API_KEY", ""))
-    app = st.secrets.get("DD_APP_KEY", os.getenv("DD_APP_KEY", ""))
+    """
+    Streamlit secrets 또는 환경 변수에서 Datadog 설정값을 로드합니다.
+    Streamlit secrets에 값이 있으면 우선적으로 사용하고, 없으면 환경 변수에서 찾습니다.
+    """
+    api_key = st.secrets.get("DD_API_KEY", os.getenv("DD_API_KEY", ""))
+    app_key = st.secrets.get("DD_APP_KEY", os.getenv("DD_APP_KEY", ""))
     site = st.secrets.get("DD_SITE", os.getenv("DD_SITE", "datadoghq.com"))
-    return Settings(api_key=api, app_key=app, site=site)
+    return Settings(api_key=api_key, app_key=app_key, site=site)
 
 def get_api_base(site: str) -> str:
+    """Datadog API 기본 URL을 생성합니다."""
     return f"https://api.{site}"
 
 def get_search_url(site: str) -> str:
+    """RUM 이벤트 검색 API의 전체 URL을 생성합니다."""
     return f"{get_api_base(site)}/api/v2/rum/events/search"
 
 # ─────────────────────────────────────────
-# 기본 숨김 컬럼 목록 (사이드바에 노출하지 않음)
+# 기본 숨김 컬럼 목록
 # ─────────────────────────────────────────
+# 이 목록에 포함된 열은 UI의 '숨길 컬럼' 선택 목록에 나타나지 않으며,
+# 기본적으로 테이블 뷰에서 숨겨집니다.
 DEFAULT_HIDDEN_COLUMNS = [
     "session.id","usr.id","attribute.os.build",
     "type","application.id","session.type","view.url","view.referrer",
@@ -57,5 +66,6 @@ DEFAULT_HIDDEN_COLUMNS = [
 ]
 
 def get_default_hidden_columns() -> list[str]:
-    # 복사본 반환(외부에서 수정 방지)
+    """기본 숨김 열 목록의 복사본을 반환합니다."""
+    # 원본 리스트가 외부에서 수정되는 것을 방지하기 위해 복사본을 반환합니다.
     return list(DEFAULT_HIDDEN_COLUMNS)

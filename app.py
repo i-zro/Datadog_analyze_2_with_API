@@ -98,7 +98,7 @@ def handle_search_and_process_data(settings, params):
 def main():
     """메인 애플리케이션 실행 함수"""
     st.set_page_config(page_title="Datadog RUM 분석기", layout="wide")
-    st.title("📞 Datadog RUM 분석기")
+    st.title("Datadog RUM 분석 Tool (API 기반)")
 
     # 설정 로드
     try:

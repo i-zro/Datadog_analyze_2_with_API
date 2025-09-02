@@ -25,13 +25,13 @@ def render_sidebar(ss, pin_count, fixed_pin):
         ss.start_dt = kst.localize(datetime.combine(start_date, start_time))
         ss.end_dt = kst.localize(datetime.combine(end_date, end_time))
 
-        limit_per_page = st.slider("페이지당 개수(limit)", 50, 1000, 200, 50)
-        max_pages = st.slider("최대 페이지 수", 1, 20, 5, 1)
+        # limit_per_page = st.slider("페이지당 개수(limit)", 50, 1000, 200, 50)
+        # max_pages = st.slider("최대 페이지 수", 1, 20, 5, 1)
 
         is_valid_time = ss.start_dt < ss.end_dt
         if not is_valid_time:
             st.error("시작 시간은 종료 시간보다 빨라야 합니다.")
-        
+
         run_search = st.button("조회", disabled=not is_valid_time)
 
         st.divider()
@@ -45,8 +45,8 @@ def render_sidebar(ss, pin_count, fixed_pin):
         "usr_id_value": usr_id,
         "from_ts": ss.start_dt.astimezone(pytz.utc).isoformat(),
         "to_ts": ss.end_dt.astimezone(pytz.utc).isoformat(),
-        "limit_per_page": limit_per_page,
-        "max_pages": max_pages,
+        "limit_per_page": 1000, #limit_per_page,
+        "max_pages": 20,#max_pages,
     }
     return run_search, search_params
 
@@ -71,7 +71,7 @@ def render_options_sidebar(ss, pin_count, fixed_pin):
 
     for i in range(pin_count):
         ss.pending_pin_slots[i] = st.selectbox(
-            f"핀 #{i+1}", options=slot_options, 
+            f"핀 #{i+1}", options=slot_options,
             index=slot_options.index(ss.pending_pin_slots[i]) if ss.pending_pin_slots[i] in slot_options else 0,
             key=f"pin_{i}"
         )
@@ -94,12 +94,12 @@ def render_main_view(ss, pin_count, fixed_pin):
     """메인 화면(통화 분석, 이벤트 로그)을 렌더링합니다."""
     if ss.df_view is not None:
         if ss.df_summary is not None and not ss.df_summary.empty:
-            st.markdown("## 📞 통화 분석")
+            st.markdown("## 통화 분석 결과")
             st.dataframe(ss.df_summary, use_container_width=True)
             st.divider()
 
-        st.markdown("## 📄 이벤트 로그")
-        
+        st.markdown("## RUM 로그")
+
         # --- 필터 및 하이라이트 UI ---
         # url path 필터
         col1, col2 = st.columns([9, 1])
@@ -108,7 +108,7 @@ def render_main_view(ss, pin_count, fixed_pin):
         # Call ID 필터
         if ss.unique_call_ids:
             selected_call_id = st.selectbox(
-                "📞 Call ID 필터",
+                "Call ID 필터",
                 options=["전체"] + ss.unique_call_ids,
                 help="특정 통화에 해당하는 로그만 필터링합니다."
             )

@@ -44,14 +44,14 @@ def build_rows_dynamic(all_events: List[Dict[str, Any]], tz_name="Asia/Seoul") -
         call_id_val = (
             flat_row.get("attributes.context.callID")
             or flat_row.get("attributes.context.callId")
-            or flat_row.get("attributes.context.CallIDs")
+            # or flat_row.get("attributes.context.CallIDs")
         )
 
         if call_id_val is not None:
             flat_row["Call ID"] = call_id_val
             flat_row.pop("attributes.context.callID", None)
             flat_row.pop("attributes.context.callId", None)
-            flat_row.pop("attributes.context.CallIDs", None)
+            # flat_row.pop("attributes.context.CallIDs", None)
 
         processed_rows.append(flat_row)
     return processed_rows

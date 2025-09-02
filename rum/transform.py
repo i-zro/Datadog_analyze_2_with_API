@@ -73,6 +73,7 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
     summaries = []
     for call_id, events in calls.items():
         termination_reason = None
+        bye_reason = None
         send_packets = []
         receive_packets = []
         request_status, accept_status, reject_status, end_status = None, None, None, None
@@ -85,6 +86,9 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
             path = event.get("attributes.resource.url_path")
             status_code = event.get("attributes.resource.status_code")
             timestamp_str = event.get("timestamp(KST)")
+
+            if event.get("attributes.context.method") == "BYE":
+                bye_reason = event.get("attributes.context.reason")
 
             if path == "/res/SDK_CALL_STATUS_ACTIVE" and active_ts is None:
                 active_ts = timestamp_str
@@ -141,6 +145,7 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
             "End Time (KST)": overall_end_time_str,
             "Duration": duration_str,
             "종료 사유": termination_reason,
+            "BYE reason": bye_reason,
             "requestVoiceCall_status_code": request_status,
             "acceptCall_status_code": accept_status,
             "rejectCall_status_code": reject_status,

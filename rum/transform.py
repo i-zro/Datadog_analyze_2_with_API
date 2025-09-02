@@ -77,25 +77,23 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
         send_packets = []
         receive_packets = []
         request_status, accept_status, reject_status, end_status = None, None, None, None
+        active_ts, stopping_ts = None, None
 
-        end_time_str = events[0].get("timestamp(KST)")
-        start_time_str = events[-1].get("timestamp(KST)")
-
-        duration_str = "N/A"
-        try:
-            end_dt = datetime.strptime(end_time_str.replace(" KST", ""), "%Y-%m-%d %H:%M:%S.%f")
-            start_dt = datetime.strptime(start_time_str.replace(" KST", ""), "%Y-%m-%d %H:%M:%S.%f")
-            duration = end_dt - start_dt
-            duration_str = str(duration - timedelta(microseconds=duration.microseconds))
-        except (ValueError, TypeError, AttributeError):
-            pass
+        # 전체 통화 시간 (첫 이벤트 ~ 마지막 이벤트)
+        overall_end_time_str = events[0].get("timestamp(KST)")
+        overall_start_time_str = events[-1].get("timestamp(KST)")
 
         # 각 이벤트에서 필요한 정보 추출
         for event in events:
             path = event.get("attributes.resource.url_path")
             status_code = event.get("attributes.resource.status_code")
+            timestamp_str = event.get("timestamp(KST)")
 
-            if path == "/res/requestVoiceCall" and request_status is None:
+            if path == "/res/SDK_CALL_STATUS_ACTIVE" and active_ts is None:
+                active_ts = timestamp_str
+            elif path == "/res/SDK_CALL_STATUS_STOPPING" and stopping_ts is None:
+                stopping_ts = timestamp_str
+            elif path == "/res/requestVoiceCall" and request_status is None:
                 request_status = status_code
             elif path == "/res/acceptCall" and accept_status is None:
                 accept_status = status_code
@@ -113,11 +111,26 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
                 count = event.get("attributes.context.totalCount")
                 if count is not None:
                     receive_packets.append(count)
+        
+        # Duration 계산
+        duration_str = ""
+        if stopping_ts is None:
+            duration_str = "STOPPING 없음"
+        elif active_ts is None:
+            duration_str = "ACTIVE 없음"
+        else:
+            try:
+                stop_dt = datetime.strptime(stopping_ts.replace(" KST", ""), "%Y-%m-%d %H:%M:%S.%f")
+                active_dt = datetime.strptime(active_ts.replace(" KST", ""), "%Y-%m-%d %H:%M:%S.%f")
+                duration_seconds = (stop_dt - active_dt).total_seconds()
+                duration_str = f"{duration_seconds:.1f} 초"
+            except (ValueError, TypeError):
+                duration_str = "시간 포맷 오류"
 
         summaries.append({
             "Call ID": call_id,
-            "Start Time (KST)": start_time_str,
-            "End Time (KST)": end_time_str,
+            "Start Time (KST)": overall_start_time_str,
+            "End Time (KST)": overall_end_time_str,
             "Duration": duration_str,
             "Termination Reason": termination_reason,
             "requestVoiceCall_status_code": request_status,

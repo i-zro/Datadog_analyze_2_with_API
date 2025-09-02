@@ -72,18 +72,15 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
 
     summaries = []
     for call_id, events in calls.items():
-        # 요약 정보 변수 초기화
         termination_reason = None
         send_packets = []
         receive_packets = []
         request_status, accept_status, reject_status, end_status = None, None, None, None
         active_ts, stopping_ts = None, None
 
-        # 전체 통화 시간 (첫 이벤트 ~ 마지막 이벤트)
         overall_end_time_str = events[0].get("timestamp(KST)")
         overall_start_time_str = events[-1].get("timestamp(KST)")
 
-        # 각 이벤트에서 필요한 정보 추출
         for event in events:
             path = event.get("attributes.resource.url_path")
             status_code = event.get("attributes.resource.status_code")
@@ -112,7 +109,6 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
                 if count is not None:
                     receive_packets.append(count)
         
-        # Duration 계산
         duration_str = ""
         if stopping_ts is None:
             duration_str = "STOPPING 없음"
@@ -148,9 +144,18 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
     return summary_df
 
 def to_base_dataframe(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
-    """평탄화된 행 목록으로부터 DataFrame을 생성하고 시간순으로 정렬합니다."""
+    """평탄화된 행 목록으로부터 DataFrame을 생성하고, 데이터 타입을 변환한 후 시간순으로 정렬합니다."""
     df = pd.DataFrame(flat_rows)
+
+    # status_code와 duration을 정수형으로 변환 (소수점 및 NaN 처리)
+    for col in ["attributes.resource.status_code", "attributes.resource.duration"]:
+        if col in df.columns:
+            # 숫자로 변환하고, 변환 불가능한 값은 NaT/NaN으로 처리합니다.
+            # 이후, NaN 값을 지원하는 Int64 타입으로 변환하여 정수형을 유지합니다.
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
+
     if "timestamp(KST)" in df.columns:
+        # KST 시간 문자열을 datetime 객체로 변환하여 정렬에 사용
         parsed_ts = pd.to_datetime(
             df["timestamp(KST)"].str.replace(" KST", "", regex=False),
             format="%Y-%m-%d %H:%M:%S.%f",

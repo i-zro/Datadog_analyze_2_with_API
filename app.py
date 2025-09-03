@@ -8,8 +8,7 @@ import pprint
 from rum.config import get_settings, get_default_hidden_columns
 from rum.datadog_api import search_rum_events
 from rum.transform import build_rows_dynamic, to_base_dataframe, apply_view_filters, summarize_calls, analyze_rtp_timeouts
-from rum.ui import render_sidebar, render_main_view
-from rum.helpers import effective_hidden, sanitize_pin_slots
+from rum.ui import render_sidebar, render_main_view, effective_hidden, sanitize_pin_slots
 
 # ─────────────────────────────────────────
 # Constants & Settings

@@ -1,3 +1,5 @@
+import re
+import streamlit as st
 from datetime import datetime, timedelta
 from dateutil import tz
 from typing import Dict, Any, List
@@ -8,6 +10,7 @@ from collections import defaultdict
 # 데이터 변환 함수
 # ─────────────────────────────────────────
 
+
 def iso_to_kst_ms(iso_str: str, tz_name: str = "Asia/Seoul") -> str:
     """ISO 8601 형식의 시간 문자열을 KST 시간(ms 단위 포함)으로 변환합니다."""
     if not iso_str:
@@ -16,6 +19,7 @@ def iso_to_kst_ms(iso_str: str, tz_name: str = "Asia/Seoul") -> str:
     kst = tz.gettz(tz_name)
     k = dt.astimezone(kst)
     return k.strftime("%Y-%m-%d %H:%M:%S.") + f"{int(k.strftime('%f'))//1000:03d} KST"
+
 
 def flatten(prefix: str, obj: Any, out: Dict[str, Any]) -> None:
     """중첩된 딕셔너리나 리스트를 평탄화하여 단일 딕셔너리로 만듭니다."""
@@ -26,6 +30,7 @@ def flatten(prefix: str, obj: Any, out: Dict[str, Any]) -> None:
         out[prefix] = ", ".join(map(str, obj))
     else:
         out[prefix] = obj
+
 
 def build_rows_dynamic(all_events: List[Dict[str, Any]], tz_name="Asia/Seoul") -> List[Dict[str, Any]]:
     """
@@ -39,6 +44,12 @@ def build_rows_dynamic(all_events: List[Dict[str, Any]], tz_name="Asia/Seoul") -
         attrs = event.get("attributes", {}) or {}
         flat_row: Dict[str, Any] = {}
         flatten("", attrs, flat_row)
+
+        # 'usr' 객체 평탄화 추가
+        usr_info = event.get("usr")
+        if usr_info:
+            flatten("usr", usr_info, flat_row)
+
         flat_row["timestamp(KST)"] = iso_to_kst_ms(attrs.get("timestamp"), tz_name)
 
         call_id_val = (
@@ -55,6 +66,7 @@ def build_rows_dynamic(all_events: List[Dict[str, Any]], tz_name="Asia/Seoul") -
 
         processed_rows.append(flat_row)
     return processed_rows
+
 
 def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
     """
@@ -160,6 +172,7 @@ def summarize_calls(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
 
     return summary_df
 
+
 def to_base_dataframe(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
     """평탄화된 행 목록으로부터 DataFrame을 생성하고, 데이터 타입을 변환한 후 시간순으로 정렬합니다."""
     df = pd.DataFrame(flat_rows)
@@ -176,6 +189,7 @@ def to_base_dataframe(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
         )
         df = df.assign(_ts=parsed_ts).sort_values("_ts", ascending=False).drop(columns=["_ts"])
     return df
+
 
 def apply_view_filters(
     df_view: pd.DataFrame,
@@ -201,6 +215,7 @@ def apply_view_filters(
         df_view = df_view.drop(columns=drops, errors="ignore")
 
     return df_view
+
 
 def analyze_rtp_timeouts(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
     """
@@ -232,7 +247,12 @@ def analyze_rtp_timeouts(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
         active_ts, stopping_ts = None, None
         bye_method_source = "N/A"
         rtp_timeout_reason = "N/A"
-        usr_id = events[0].get("usr.id") if events else "N/A"
+        
+        usr_id = "N/A"
+        for event in events:
+            if event.get("usr.id"):
+                usr_id = event.get("usr.id")
+                break
 
         overall_end_time_str = events[0].get("timestamp(KST)")
         overall_start_time_str = events[-1].get("timestamp(KST)")
@@ -297,3 +317,28 @@ def analyze_rtp_timeouts(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
         summary_df = summary_df.sort_values("Start Time (KST)", ascending=False).reset_index(drop=True)
 
     return summary_df
+
+
+def filter_dataframe(df: pd.DataFrame, column: str, filter_text: str, is_and: bool) -> pd.DataFrame:
+    """
+    주어진 조건에 따라 데이터프레임을 필터링합니다.
+    """
+    if column not in df.columns:
+        st.warning(f"'{column}' 컬럼이 없어 필터링할 수 없습니다.")
+        return df
+
+    keywords = [kw.strip() for kw in filter_text.split(',') if kw.strip()]
+    if not keywords:
+        return df
+
+    series = df[column].fillna('')
+    
+    if is_and:
+        condition = pd.Series(True, index=df.index)
+        for kw in keywords:
+            condition &= series.str.contains(re.escape(kw), case=False, regex=True)
+    else:
+        regex_pattern = '|'.join(re.escape(kw) for kw in keywords)
+        condition = series.str.contains(regex_pattern, case=False, regex=True)
+    
+    return df[condition]

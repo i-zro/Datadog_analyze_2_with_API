@@ -201,3 +201,99 @@ def apply_view_filters(
         df_view = df_view.drop(columns=drops, errors="ignore")
 
     return df_view
+
+def analyze_rtp_timeouts(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    """
+    RTP Timeout이 발생한 통화를 분석합니다.
+    - 'rtp' 또는 'RTP'가 포함된 reason을 가진 이벤트를 기반으로 Call ID를 필터링합니다.
+    - 통화 유지 시간 (ACTIVE ~ STOPPING)을 계산합니다.
+    - BYE 메시지의 출처(longRes, restReq 등)를 분석합니다.
+    """
+    rtp_timeout_call_ids = set()
+    for row in flat_rows:
+        reason = row.get("attributes.context.reason", "")
+        if isinstance(reason, str) and "rtp" in reason.lower():
+            call_id = row.get("Call ID")
+            if call_id:
+                rtp_timeout_call_ids.add(call_id)
+
+    if not rtp_timeout_call_ids:
+        return pd.DataFrame()
+
+    calls = defaultdict(list)
+    for row in flat_rows:
+        call_id = row.get("Call ID")
+        if call_id in rtp_timeout_call_ids:
+            calls[call_id].append(row)
+
+    summaries = []
+    for call_id, events in calls.items():
+        # events are assumed to be sorted descending by timestamp from the dataframe
+        active_ts, stopping_ts = None, None
+        bye_method_source = "N/A"
+        rtp_timeout_reason = "N/A"
+        usr_id = events[0].get("usr.id") if events else "N/A"
+
+        overall_end_time_str = events[0].get("timestamp(KST)")
+        overall_start_time_str = events[-1].get("timestamp(KST)")
+
+        for event in events:
+            path = event.get("attributes.resource.url_path")
+            timestamp_str = event.get("timestamp(KST)")
+            reason = event.get("attributes.context.reason", "")
+
+            if isinstance(reason, str) and "rtp" in reason.lower() and rtp_timeout_reason == "N/A":
+                rtp_timeout_reason = reason
+
+            if path == "/res/SDK_CALL_STATUS_ACTIVE" and active_ts is None:
+                active_ts = timestamp_str
+            elif path == "/res/SDK_CALL_STATUS_STOPPING" and stopping_ts is None:
+                stopping_ts = timestamp_str
+
+            if event.get("attributes.context.method") == "BYE":
+                # This is a guess based on user's request.
+                # We assume the source information is in the url_path.
+                url_path = event.get("attributes.resource.url_path", "").lower()
+                if "longres" in url_path:
+                    bye_method_source = "longRes"
+                elif "restreq" in url_path:
+                    bye_method_source = "restReq"
+                elif "sendmessage" in url_path:
+                    bye_method_source = "sendMessage"
+                elif "recvmessage" in url_path:
+                    bye_method_source = "recvMessage"
+                else:
+                    bye_method_source = "Unknown"
+
+        duration_str = ""
+        if stopping_ts and active_ts:
+            try:
+                stop_dt = datetime.strptime(stopping_ts.replace(" KST", ""), "%Y-%m-%d %H:%M:%S.%f")
+                active_dt = datetime.strptime(active_ts.replace(" KST", ""), "%Y-%m-%d %H:%M:%S.%f")
+                duration_seconds = (stop_dt - active_dt).total_seconds()
+                duration_str = f"{duration_seconds:.1f} 초"
+            except (ValueError, TypeError):
+                duration_str = "시간 포맷 오류"
+        elif not active_ts:
+            duration_str = "ACTIVE 없음"
+        elif not stopping_ts:
+            duration_str = "STOPPING 없음"
+
+        summaries.append({
+            "Call ID": call_id,
+            "Start Time (KST)": overall_start_time_str,
+            "End Time (KST)": overall_end_time_str,
+            "통화 시간": duration_str,
+            "BYE Reason": rtp_timeout_reason,
+            "BYE 전달": bye_method_source,
+            "usr.id": usr_id,
+        })
+
+    if not summaries:
+        return pd.DataFrame()
+
+    summary_df = pd.DataFrame(summaries)
+    if not summary_df.empty:
+        summary_df = summary_df.sort_values("Start Time (KST)", ascending=False).reset_index(drop=True)
+
+    return summary_df

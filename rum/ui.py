@@ -4,15 +4,23 @@ import pytz
 import pandas as pd
 
 from .helpers import effective_hidden, sanitize_pin_slots, reorder_for_pinned, filter_dataframe, apply_row_highlighting
-from .transform import apply_view_filters
+from .transform import apply_view_filters, analyze_rtp_timeouts
 
 def render_sidebar(ss, pin_count, fixed_pin):
     """
     사이드바 UI를 렌더링하고 검색 파라미터를 반환합니다.
     """
     with st.sidebar:
-        st.markdown("### 검색 조건")
-        usr_id = st.text_input("usr.id", value="", placeholder="예: user_1234 (비우면 전체 *)")
+        st.markdown("### 분석 유형")
+        analysis_type = st.radio("분석 유형 선택", ["User ID 분석", "RTP Timeout 분석"], label_visibility="collapsed")
+
+        st.divider()
+
+        if analysis_type == "User ID 분석":
+            st.markdown("### 검색 조건")
+            usr_id = st.text_input("usr.id", value="", placeholder="예: user_1234 (비우면 전체 *)")
+        else:
+            usr_id = ""
 
         kst = pytz.timezone("Asia/Seoul")
         st.markdown("##### 검색 기간 (KST)")
@@ -25,19 +33,23 @@ def render_sidebar(ss, pin_count, fixed_pin):
         ss.start_dt = kst.localize(datetime.combine(start_date, start_time))
         ss.end_dt = kst.localize(datetime.combine(end_date, end_time))
 
-        # limit_per_page = st.slider("페이지당 개수(limit)", 50, 1000, 200, 50)
-        # max_pages = st.slider("최대 페이지 수", 1, 20, 5, 1)
-
         is_valid_time = ss.start_dt < ss.end_dt
         if not is_valid_time:
             st.error("시작 시간은 종료 시간보다 빨라야 합니다.")
 
-        run_search = st.button("조회", disabled=not is_valid_time)
+        if analysis_type == "User ID 분석":
+            run_search = st.button("조회", disabled=not is_valid_time)
+            run_rtp_analysis = False
+        else:
+            run_rtp_analysis = st.button("RTP Timeout 분석", disabled=not is_valid_time)
+            run_search = False
 
         st.divider()
         st.markdown("### 표시 옵션")
-        if ss.df_base is not None:
+        if ss.df_base is not None and analysis_type == "User ID 분석":
             render_options_sidebar(ss, pin_count, fixed_pin)
+        elif analysis_type != "User ID 분석":
+             st.info("RTP Timeout 분석에서는 표시 옵션을 사용할 수 없습니다.")
         else:
             st.info("먼저 '조회'를 실행하세요.")
 
@@ -45,10 +57,11 @@ def render_sidebar(ss, pin_count, fixed_pin):
         "usr_id_value": usr_id,
         "from_ts": ss.start_dt.astimezone(pytz.utc).isoformat(),
         "to_ts": ss.end_dt.astimezone(pytz.utc).isoformat(),
-        "limit_per_page": 1000, #limit_per_page,
-        "max_pages": 20,#max_pages,
+        "limit_per_page": 1000,
+        "max_pages": 20,
+        "analysis_type": analysis_type
     }
-    return run_search, search_params
+    return run_search, run_rtp_analysis, search_params
 
 def render_options_sidebar(ss, pin_count, fixed_pin):
     """사이드바에 표시 옵션(열 숨김, 핀 설정 등)을 렌더링합니다."""
@@ -92,6 +105,11 @@ def render_options_sidebar(ss, pin_count, fixed_pin):
 
 def render_main_view(ss, fixed_pin):
     """메인 화면(통화 분석, 이벤트 로그)을 렌더링합니다."""
+    if ss.get('df_rtp_summary') is not None and not ss.df_rtp_summary.empty:
+        st.markdown("## RTP Timeout 분석 결과")
+        st.dataframe(ss.df_rtp_summary, use_container_width=True, height=800)
+        st.divider()
+
     if ss.df_view is not None:
         if ss.df_summary is not None and not ss.df_summary.empty:
             st.markdown("## 통화 분석 결과")
@@ -142,5 +160,5 @@ def render_main_view(ss, fixed_pin):
         with st.expander("원본 이벤트(JSON) 보기"):
             if st.checkbox("JSON 변환/표시"):
                 st.json(df_render.head(50).to_dict(orient="records"))
-    else:
+    elif ss.get('df_rtp_summary') is None:
         st.caption("조회 실행 후 결과가 나타납니다.")

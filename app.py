@@ -10,6 +10,9 @@ from rum.datadog_api import search_rum_events
 from rum.transform import build_rows_dynamic, to_base_dataframe, apply_view_filters, summarize_calls, analyze_rtp_timeouts
 from rum.ui import render_sidebar, render_main_view, effective_hidden, sanitize_pin_slots
 
+# TODO 1. Log 분석해서 RUM 데이터와 결합하여 분석하기 -> callId 기반으로 검색해서 데이터를 얻을 수 있을지 검토 필요
+# TODO 2. 대시보드 데이터 보여주기
+
 # ─────────────────────────────────────────
 # Constants & Settings
 # ─────────────────────────────────────────
@@ -113,6 +116,7 @@ def handle_rtp_analysis(settings, params):
     rtp_reason_query = "@context.reason:(*RTP* OR *rtp*)"
     with st.spinner(f"1/2: RTP Timeout 이벤트 검색 중... (query: {rtp_reason_query})"):
         rtp_timeout_events = search_rum_events(settings=settings, query=rtp_reason_query, **api_params)
+        # pprint.pprint(rtp_timeout_events)
     
     if not rtp_timeout_events:
         st.info("해당 기간에 RTP Timeout으로 기록된 통화가 없습니다.")

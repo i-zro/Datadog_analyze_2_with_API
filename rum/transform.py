@@ -1,3 +1,4 @@
+import pprint
 import re
 import streamlit as st
 from datetime import datetime, timedelta
@@ -49,6 +50,11 @@ def build_rows_dynamic(all_events: List[Dict[str, Any]], tz_name="Asia/Seoul") -
         usr_info = event.get("usr")
         if usr_info:
             flatten("usr", usr_info, flat_row)
+
+        # Add tags
+        tags = event.get("tags")
+        if tags:
+            flat_row["tags"] = tags
 
         flat_row["timestamp(KST)"] = iso_to_kst_ms(attrs.get("timestamp"), tz_name)
 
@@ -249,10 +255,20 @@ def analyze_rtp_timeouts(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
         rtp_timeout_reason = "N/A"
         
         usr_id = "N/A"
-        for event in events:
-            if event.get("usr.id"):
-                usr_id = event.get("usr.id")
-                break
+        first_version = "N/A"
+
+        if events:
+            # Extract first_version from tags. Tags should be consistent across events for a call.
+            tags_str = events[0].get("tags", "")
+            if tags_str:
+                match = re.search(r"first_version:([^,]+)", tags_str)
+                if match:
+                    first_version = match.group(1).strip()
+            
+            for event in events:
+                if event.get("attributes.usr.id"):
+                    usr_id = event.get("attributes.usr.id")
+                    break
 
         overall_end_time_str = events[0].get("timestamp(KST)")
         overall_start_time_str = events[-1].get("timestamp(KST)")
@@ -301,6 +317,7 @@ def analyze_rtp_timeouts(flat_rows: List[Dict[str, Any]]) -> pd.DataFrame:
 
         summaries.append({
             "Call ID": call_id,
+            "App Version": first_version,
             "Start Time (KST)": overall_start_time_str,
             "End Time (KST)": overall_end_time_str,
             "통화 시간": duration_str,

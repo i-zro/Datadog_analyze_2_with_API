@@ -2,6 +2,7 @@ import json
 import requests
 from typing import List, Dict, Any
 import streamlit as st
+import pprint
 
 from .config import get_search_url, Settings
 
@@ -38,6 +39,7 @@ def search_rum_events(
         "page": {"limit": limit_per_page},
         "sort": "-timestamp",
     }
+    # pprint.pprint(body)
 
     headers = {
         "Accept": "application/json",
@@ -45,6 +47,7 @@ def search_rum_events(
         "DD-API-KEY": settings.api_key,
         "DD-APPLICATION-KEY": settings.app_key,
     }
+    # pprint.pprint(headers)
 
     all_events: List[Dict[str, Any]] = []
     cursor = None

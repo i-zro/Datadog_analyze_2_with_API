@@ -202,6 +202,7 @@ def render_main_view(ss, fixed_pin):
     # Custom Query 분석 시, 검색창을 메인 뷰에 표시
     if ss.analysis_type == "Custom Query 분석":
         st.markdown("### 검색 조건")
+        st.warning("공란으로 검색하지 말아주세요~")
         ss.custom_query = st.text_area("Datadog Query", value=ss.custom_query, placeholder="예: @context.callID:\"...\" AND (*ERROR* OR *FAIL*)", height=100, label_visibility="collapsed")
 
     if ss.get('df_rtp_summary') is not None and not ss.df_rtp_summary.empty:

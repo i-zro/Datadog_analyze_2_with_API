@@ -6,7 +6,7 @@ import pprint
 
 # RUM modules
 from rum.config import get_settings, get_default_hidden_columns
-from rum.datadog_api import search_rum_events
+from rum.datadog_api import search_rum_events, DatadogAPIClient
 from rum.transform import build_rows_dynamic, to_base_dataframe, apply_view_filters, summarize_calls, analyze_rtp_timeouts
 from rum.ui import render_sidebar, render_main_view, effective_hidden, sanitize_pin_slots
 
@@ -36,6 +36,8 @@ def initialize_session_state():
         "table_height": 900,  # 테이블 높이
         "pin_slots": [""] * PIN_COUNT,  # 고정 열 슬롯
         "unique_call_ids": [], # 고유 통화 ID 목록
+        "custom_query": "", # Custom Query 저장
+        "analysis_type": "User ID 분석", # 현재 분석 유형
     }
     for key, value in defaults.items():
         if key not in ss:
@@ -54,7 +56,7 @@ def initialize_session_state():
     if "end_dt" not in ss:
         ss.end_dt = datetime.now(kst)
 
-def handle_search_and_process_data(settings, params):
+def handle_search_and_process_data(client: DatadogAPIClient, params: dict):
     """API 검색을 실행하고 결과를 처리하여 세션 상태에 저장합니다."""
     ss = st.session_state
     ss.df_rtp_summary = None # 다른 분석 결과 초기화
@@ -69,7 +71,7 @@ def handle_search_and_process_data(settings, params):
         query = f'@usr.id:"{safe_usr_id}"'
 
     with st.spinner("검색 중..."):
-        raw_events = search_rum_events(settings=settings, query=query, **params)
+        raw_events = search_rum_events(client=client, query=query, **params)
     st.success(f"가져온 이벤트: {len(raw_events)}건")
 
     if not raw_events:
@@ -102,7 +104,46 @@ def handle_search_and_process_data(settings, params):
     else:
         ss.unique_call_ids = []
 
-def handle_rtp_analysis(settings, params):
+def handle_custom_query_search(client: DatadogAPIClient, params: dict):
+    """Custom query 검색을 실행하고 결과를 처리하여 세션 상태에 저장합니다."""
+    ss = st.session_state
+    ss.df_summary = None
+    ss.df_rtp_summary = None
+
+    query = params.pop("custom_query", "*")
+    params.pop("analysis_type", None)
+    params.pop("usr_id_value", None)
+
+    if not query.strip():
+        query = "*"
+
+    with st.spinner(f"검색 중... (query: {query})"):
+        raw_events = search_rum_events(client=client, query=query, **params)
+    st.success(f"가져온 이벤트: {len(raw_events)}건")
+
+    if not raw_events:
+        ss.df_base = ss.df_view = ss.df_summary = None
+        ss.unique_call_ids = []
+        st.info("검색 결과가 없습니다.")
+        return
+
+    with st.spinner("이벤트 데이터 변환 중..."):
+        flat_rows = build_rows_dynamic(raw_events, tz_name="Asia/Seoul")
+
+    ss.df_base = to_base_dataframe(flat_rows)
+    all_cols = [c for c in ss.df_base.columns if c != "timestamp(KST)"]
+
+    ss.hidden_cols_user = [c for c in ss.hidden_cols_user if c in all_cols]
+    ss.pending_hidden_cols_user = ss.hidden_cols_user.copy()
+
+    visible_cols = [c for c in all_cols if c not in effective_hidden(all_cols, ss.pending_hidden_cols_user, ss.hide_defaults, FIXED_PIN)]
+    ss.pin_slots = sanitize_pin_slots(ss.pin_slots, visible_cols, PIN_COUNT, FIXED_PIN)
+    ss.pending_pin_slots = ss.pin_slots.copy()
+
+    eff_hidden_applied = effective_hidden(all_cols, ss.hidden_cols_user, ss.hide_defaults, FIXED_PIN)
+    ss.df_view = apply_view_filters(ss.df_base.copy(), hidden_cols=eff_hidden_applied)
+
+def handle_rtp_analysis(client: DatadogAPIClient, params: dict):
     """RTP Timeout 통화에 대한 2단계 분석을 수행합니다."""
     ss = st.session_state
     ss.df_base = ss.df_view = ss.df_summary = None
@@ -115,7 +156,7 @@ def handle_rtp_analysis(settings, params):
     # 1단계: RTP Timeout이 발생한 Call ID 수집
     rtp_reason_query = "@context.reason:(*RTP* OR *rtp*)"
     with st.spinner(f"1/2: RTP Timeout 이벤트 검색 중... (query: {rtp_reason_query})"):
-        rtp_timeout_events = search_rum_events(settings=settings, query=rtp_reason_query, **api_params)
+        rtp_timeout_events = search_rum_events(client=client, query=rtp_reason_query, **api_params)
         # pprint.pprint(rtp_timeout_events)
     
     if not rtp_timeout_events:
@@ -144,7 +185,7 @@ def handle_rtp_analysis(settings, params):
     full_query = f'(@context.callID:({call_id_query_part}) OR @context.callId:({call_id_query_part}))'
     
     with st.spinner(f"2/2: {len(call_ids)}개 통화의 전체 이벤트 검색 중..."):
-        raw_events = search_rum_events(settings=settings, query=full_query, **api_params)
+        raw_events = search_rum_events(client=client, query=full_query, **api_params)
     st.toast(f"2/2: 총 {len(raw_events)}개의 관련 이벤트를 가져왔습니다.")
 
     if not raw_events:
@@ -170,7 +211,8 @@ def main():
     st.title("Datadog RUM 분석 Tool (API 기반)")
 
     try:
-        settings = get_settings()
+        settings = get_settings() # .streamlit/secrets.toml
+        client = DatadogAPIClient(settings.api_key, settings.app_key, settings.site)
         st.write(f"**Site:** `{settings.site}`")
     except (KeyError, FileNotFoundError):
         st.error("설정 파일(.streamlit/secrets.toml)을 찾을 수 없거나 키가 누락되었습니다.")
@@ -179,13 +221,16 @@ def main():
     initialize_session_state()
     
     ss = st.session_state
-    run_search, run_rtp_analysis, search_params = render_sidebar(ss, PIN_COUNT, FIXED_PIN)
+    run_search, run_rtp_analysis, run_custom_query, search_params = render_sidebar(ss, PIN_COUNT, FIXED_PIN)
 
     if run_search:
-        handle_search_and_process_data(settings, search_params)
+        handle_search_and_process_data(client, search_params)
     
     if run_rtp_analysis:
-        handle_rtp_analysis(settings, search_params)
+        handle_rtp_analysis(client, search_params)
+
+    if run_custom_query:
+        handle_custom_query_search(client, search_params)
     
     render_main_view(ss, FIXED_PIN)
 

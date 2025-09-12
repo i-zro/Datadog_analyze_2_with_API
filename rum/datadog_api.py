@@ -2,12 +2,11 @@ import json
 import requests
 from typing import List, Dict, Any
 import streamlit as st
-import pprint
 
-from .config import get_search_url, Settings
+from .api_client import DatadogAPIClient
 
 def search_rum_events(
-    settings: Settings,
+    client: DatadogAPIClient,
     query: str,
     from_ts: str,
     to_ts: str,
@@ -22,7 +21,7 @@ def search_rum_events(
     - 페이지네이션: 커서를 따라가며 max_pages까지 수집
 
     Args:
-        settings: API 키, 앱 키, 사이트 정보가 담긴 설정 객체
+        client: DatadogAPIClient 인스턴스
         query: 검색할 Datadog 쿼리
         from_ts: 검색 시작 시간 (UTC, ISO 8601)
         to_ts: 검색 종료 시간 (UTC, ISO 8601)
@@ -32,23 +31,12 @@ def search_rum_events(
     Returns:
         검색된 RUM 이벤트의 원본(raw) 목록
     """
-    search_url = get_search_url(settings.site)
-
     body = {
         "filter": {"from": from_ts, "to": to_ts, "query": query},
         "page": {"limit": limit_per_page},
         "sort": "-timestamp",
     }
-    # pprint.pprint(body)
-
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "DD-API-KEY": settings.api_key,
-        "DD-APPLICATION-KEY": settings.app_key,
-    }
-    # pprint.pprint(headers)
-
+    
     all_events: List[Dict[str, Any]] = []
     cursor = None
 
@@ -57,14 +45,14 @@ def search_rum_events(
             body["page"]["cursor"] = cursor
 
         try:
-            resp = requests.post(search_url, headers=headers, data=json.dumps(body), timeout=30)
-            resp.raise_for_status()
+            data = client.post("/api/v2/rum/events/search", body)
         except requests.exceptions.RequestException as e:
             st.error(f"API 요청 실패: {e}")
-            st.code(resp.text if resp else "No response", language="json")
+            if e.response:
+                st.code(e.response.text, language="json")
             return []
 
-        data = resp.json()
+        # data = resp.json()
         events = data.get("data", [])
         all_events.extend(events)
 

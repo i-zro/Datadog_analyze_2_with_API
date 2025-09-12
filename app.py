@@ -63,6 +63,7 @@ def handle_search_and_process_data(client: DatadogAPIClient, params: dict):
 
     usr_id_value = params.pop("usr_id_value", None)
     params.pop("analysis_type", None)
+    params.pop("custom_query", None)  # custom_query는 이 분석에서 사용하지 않으므로 제거
 
     if not usr_id_value:
         query = "*"
@@ -152,6 +153,7 @@ def handle_rtp_analysis(client: DatadogAPIClient, params: dict):
     api_params = params.copy()
     api_params.pop("analysis_type", None)
     api_params.pop("usr_id_value", None)
+    api_params.pop("custom_query", None) # custom_query 파라미터 제거
 
     # 1단계: RTP Timeout이 발생한 Call ID 수집
     rtp_reason_query = "@context.reason:(*RTP* OR *rtp*)"

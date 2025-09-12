@@ -94,15 +94,19 @@ def render_sidebar(ss, pin_count, fixed_pin):
     """
     with st.sidebar:
         st.markdown("### 분석 유형")
-        analysis_type = st.radio("분석 유형 선택", ["User ID 분석", "RTP Timeout 분석"], label_visibility="collapsed")
+        ss.analysis_type = st.radio(
+            "분석 유형 선택",
+            ["User ID 분석", "RTP Timeout 분석", "Custom Query 분석"],
+            label_visibility="collapsed",
+            key="analysis_type_radio" # 위젯 키를 통해 상태 유지
+        )
 
         st.divider()
 
-        if analysis_type == "User ID 분석":
+        usr_id = ""
+        if ss.analysis_type == "User ID 분석":
             st.markdown("### 검색 조건")
             usr_id = st.text_input("usr.id", value="", placeholder="예: user_1234 (비우면 전체 *)")
-        else:
-            usr_id = ""
 
         kst = pytz.timezone("Asia/Seoul")
         st.markdown("##### 검색 기간 (KST)")
@@ -119,31 +123,39 @@ def render_sidebar(ss, pin_count, fixed_pin):
         if not is_valid_time:
             st.error("시작 시간은 종료 시간보다 빨라야 합니다.")
 
-        if analysis_type == "User ID 분석":
+        run_search = False
+        run_rtp_analysis = False
+        run_custom_query = False
+
+        if ss.analysis_type == "User ID 분석":
             run_search = st.button("조회", disabled=not is_valid_time)
-            run_rtp_analysis = False
-        else:
+        elif ss.analysis_type == "RTP Timeout 분석":
             run_rtp_analysis = st.button("RTP Timeout 분석", disabled=not is_valid_time)
-            run_search = False
+        elif ss.analysis_type == "Custom Query 분석":
+            run_custom_query = st.button("조회", disabled=not is_valid_time)
 
         st.divider()
         st.markdown("### 표시 옵션")
-        if ss.df_base is not None and analysis_type == "User ID 분석":
-            render_options_sidebar(ss, pin_count, fixed_pin)
-        elif analysis_type != "User ID 분석":
+        if ss.analysis_type == "User ID 분석" or ss.analysis_type == "Custom Query 분석":
+            if ss.df_base is not None:
+                render_options_sidebar(ss, pin_count, fixed_pin)
+            else:
+                st.info("먼저 '조회'를 실행하세요.")
+        elif ss.analysis_type == "RTP Timeout 분석":
              st.info("RTP Timeout 분석에서는 표시 옵션을 사용할 수 없습니다.")
-        else:
-            st.info("먼저 '조회'를 실행하세요.")
+        else: # Should not happen
+            render_options_sidebar(ss, pin_count, fixed_pin)
 
     search_params = {
         "usr_id_value": usr_id,
+        "custom_query": ss.custom_query,
         "from_ts": ss.start_dt.astimezone(pytz.utc).isoformat(),
         "to_ts": ss.end_dt.astimezone(pytz.utc).isoformat(),
         "limit_per_page": 1000,
         "max_pages": 20,
-        "analysis_type": analysis_type
+        "analysis_type": ss.analysis_type
     }
-    return run_search, run_rtp_analysis, search_params
+    return run_search, run_rtp_analysis, run_custom_query, search_params
 
 def render_options_sidebar(ss, pin_count, fixed_pin):
     """사이드바에 표시 옵션(열 숨김, 핀 설정 등)을 렌더링합니다."""
@@ -187,6 +199,11 @@ def render_options_sidebar(ss, pin_count, fixed_pin):
 
 def render_main_view(ss, fixed_pin):
     """메인 화면(통화 분석, 이벤트 로그)을 렌더링합니다."""
+    # Custom Query 분석 시, 검색창을 메인 뷰에 표시
+    if ss.analysis_type == "Custom Query 분석":
+        st.markdown("### 검색 조건")
+        ss.custom_query = st.text_area("Datadog Query", value=ss.custom_query, placeholder="예: @context.callID:\"...\" AND (*ERROR* OR *FAIL*)", height=100, label_visibility="collapsed")
+
     if ss.get('df_rtp_summary') is not None and not ss.df_rtp_summary.empty:
         st.markdown("## RTP Timeout 분석 결과")
         st.dataframe(ss.df_rtp_summary, use_container_width=True, height=800)
@@ -242,5 +259,8 @@ def render_main_view(ss, fixed_pin):
         with st.expander("원본 이벤트(JSON) 보기"):
             if st.checkbox("JSON 변환/표시"):
                 st.json(df_render.head(50).to_dict(orient="records"))
-    elif ss.get('df_rtp_summary') is None:
-        st.caption("조회 실행 후 결과가 나타납니다.")
+    elif ss.get('df_rtp_summary') is None and ss.df_view is None:
+        if ss.analysis_type == "Custom Query 분석":
+            st.caption("쿼리 입력 후 '조회'를 실행하세요.")
+        else:
+            st.caption("조회 실행 후 결과가 나타납니다.")
